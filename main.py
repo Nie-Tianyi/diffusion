@@ -76,12 +76,12 @@ class EMA:
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 self.backup[name] = param.data.clone()
-                param.data = self.shadow[name]
+                param.data = self.shadow[name].to(param.device)
 
     def restore(self) -> None:
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                param.data = self.backup[name]
+                param.data = self.backup[name].to(param.device)
         self.backup.clear()
 
     def state_dict(self) -> dict:
@@ -274,7 +274,10 @@ def train(cfg: Config, resume: str | None = None):
             if global_step % tc.sample_interval == 0 or global_step == 1:
                 ema.apply_shadow()
                 sample_and_save(
-                    model, diffusion, global_step, sample_dir, device, fixed_noise
+                    model, diffusion, global_step, sample_dir, device, fixed_noise,
+                    sampler=tc.sampler,
+                    ddim_steps=tc.ddim_steps,
+                    ddim_eta=tc.ddim_eta,
                 )
                 ema.restore()
 
@@ -294,7 +297,12 @@ def train(cfg: Config, resume: str | None = None):
 
     # ── Final sample with EMA ──
     ema.apply_shadow()
-    sample_and_save(model, diffusion, global_step + 1, sample_dir, device, fixed_noise)
+    sample_and_save(
+        model, diffusion, global_step + 1, sample_dir, device, fixed_noise,
+        sampler=tc.sampler,
+        ddim_steps=tc.ddim_steps,
+        ddim_eta=tc.ddim_eta,
+    )
     ema.restore()
     print(f"Final samples saved in {sample_dir}")
 
@@ -320,6 +328,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--lr", type=float, default=None, help="Override learning rate")
     p.add_argument("--resume", type=str, default=None, help="Resume from checkpoint path")
     p.add_argument("--no-amp", action="store_true", help="Disable mixed precision")
+    p.add_argument("--sampler", type=str, default=None, choices=["ddpm", "ddim"], help="Sampling method")
+    p.add_argument("--ddim-steps", type=int, default=None, help="DDIM sampling steps")
+    p.add_argument("--ddim-eta", type=float, default=None, help="DDIM stochasticity (0=deterministic)")
     args = p.parse_args()
     return args
 
@@ -337,6 +348,12 @@ def main():
         cfg.training.lr = args.lr
     if args.no_amp:
         cfg.training.use_amp = False
+    if args.sampler is not None:
+        cfg.training.sampler = args.sampler
+    if args.ddim_steps is not None:
+        cfg.training.ddim_steps = args.ddim_steps
+    if args.ddim_eta is not None:
+        cfg.training.ddim_eta = args.ddim_eta
 
     # Dump config
     print("=" * 50)

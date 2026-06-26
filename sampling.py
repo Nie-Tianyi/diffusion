@@ -19,22 +19,44 @@ def sample_and_save(
     device: torch.device,
     fixed_noise: torch.Tensor,
     ema_model: nn.Module | None = None,
+    sampler: str = "ddpm",
+    ddim_steps: int = 50,
+    ddim_eta: float = 0.0,
 ) -> None:
     """Generate a grid of samples from fixed noise and save as PNG.
 
     Uses the same fixed noise at every call so you can watch the same
     "seeds" evolve as training progresses.
+
+    Parameters
+    ----------
+    sampler : str
+        "ddpm" or "ddim" — which reverse sampler to use.
+    ddim_steps : int
+        Number of DDIM steps (only used when sampler="ddim").
+    ddim_eta : float
+        DDIM stochasticity — 0 = deterministic, 1 = DDPM-like.
     """
     # Use EMA weights for inference when available
     m = ema_model if ema_model is not None else model
     m.eval()
 
-    samples = diffusion.p_sample_loop(
-        m,
-        shape=fixed_noise.shape,
-        device=device,
-        noise=fixed_noise,
-    )
+    if sampler == "ddim":
+        samples = diffusion.ddim_sample_loop(
+            m,
+            shape=fixed_noise.shape,
+            device=device,
+            ddim_steps=ddim_steps,
+            eta=ddim_eta,
+            noise=fixed_noise,
+        )
+    else:
+        samples = diffusion.p_sample_loop(
+            m,
+            shape=fixed_noise.shape,
+            device=device,
+            noise=fixed_noise,
+        )
 
     m.train()
 

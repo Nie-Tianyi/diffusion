@@ -47,6 +47,11 @@ class TrainingConfig:
     save_interval: int = 10       # save checkpoint every N epochs
     n_sample_images: int = 64     # generate 8×8 grid
 
+    # Sampling
+    sampler: str = "ddpm"         # "ddpm" or "ddim"
+    ddim_steps: int = 50          # DDIM substep count
+    ddim_eta: float = 0.0         # DDIM stochasticity (0=deterministic)
+
     # Output
     output_dir: str = "./outputs"
 
