@@ -80,27 +80,28 @@ class GaussianDiffusion:
             raise ValueError(f"Unknown schedule: {schedule}")
 
         # ── Precompute coefficients ──
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
-        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0)
+        alphas = 1.0 - betas # α_t
+        alphas_cumprod = torch.cumprod(alphas, dim=0) # ᾱ_t = ∏ᵗ α_s
+        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0) # ᾱ_{t-1}:[1.0, ᾱ_0, ᾱ_1, …, ᾱ_{T-2}]
 
-        # Forward process
-        self.sqrt_alphas_cumprod = alphas_cumprod.sqrt()
-        self.sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod).sqrt()
+        # Forward process — q(x_t | x_0) = N(x_t; √ᾱ_t·x_0, (1-ᾱ_t)·I)  
+        self.sqrt_alphas_cumprod = alphas_cumprod.sqrt() # √ᾱ_t
+        self.sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod).sqrt() # √(1-ᾱ_t)
 
-        # Reverse process — x₀ recovery (for clipping)
-        self.sqrt_recip_alphas_cumprod = (1.0 / alphas_cumprod).sqrt()
-        self.sqrt_recipm1_alphas_cumprod = (1.0 / alphas_cumprod - 1.0).sqrt()
+        # Reverse process — recover predicted x₀ from ε_θ via Eq. (15):
+        #   x̂₀ = 1/√ᾱ_t · x_t  −  √(1/ᾱ_t − 1) · ε_θ(x_t, t)
+        self.sqrt_recip_alphas_cumprod = (1.0 / alphas_cumprod).sqrt()     # 1 / √ᾱ_t
+        self.sqrt_recipm1_alphas_cumprod = (1.0 / alphas_cumprod - 1.0).sqrt()  # √(1/ᾱ_t − 1)
 
-        # Reverse process — posterior mean via x₀ (Improved DDPM eq. 9)
+        # Reverse process — posterior q(x_{t-1} | x_t, x₀) via Improved DDPM eq. 9:
         self.posterior_mean_coef1 = (
-            betas * alphas_cumprod_prev.sqrt() / (1.0 - alphas_cumprod)
+            betas * alphas_cumprod_prev.sqrt() / (1.0 - alphas_cumprod)   # √ᾱ_{t-1}·β_t / (1-ᾱ_t)
         )
         self.posterior_mean_coef2 = (
-            (1.0 - alphas_cumprod_prev) * alphas.sqrt() / (1.0 - alphas_cumprod)
+            (1.0 - alphas_cumprod_prev) * alphas.sqrt() / (1.0 - alphas_cumprod)  # √α_t·(1-ᾱ_{t-1}) / (1-ᾱ_t)
         )
         self.posterior_variance = (
-            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
+            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)  # β_t·(1-ᾱ_{t-1}) / (1-ᾱ_t)
         )
 
         # Loss
@@ -133,7 +134,6 @@ class GaussianDiffusion:
 
         xt = self.q_sample(x0, t, noise)
         predicted_noise = denoise_fn(xt, t)
-
         if self.loss_type == "l1":
             return F.l1_loss(predicted_noise, noise)
         return F.mse_loss(predicted_noise, noise)
@@ -161,8 +161,9 @@ class GaussianDiffusion:
         # Recover predicted x₀ and clip
         sr_ac = _extract(self.sqrt_recip_alphas_cumprod, t_tensor, x.shape)
         sr_m1_ac = _extract(self.sqrt_recipm1_alphas_cumprod, t_tensor, x.shape)
+        # x̂₀ = 1/√ᾱ_t · x_t  −  √(1/ᾱ_t − 1) · ε_θ(x_t, t)
         pred_x0 = sr_ac * x - sr_m1_ac * eps
-        pred_x0 = torch.clamp(pred_x0, -1.0, 1.0)
+        pred_x0 = torch.clamp(pred_x0, -1.0, 1.0) 
 
         # Posterior mean from clipped x₀
         coef1 = _extract(self.posterior_mean_coef1, t_tensor, x.shape)
